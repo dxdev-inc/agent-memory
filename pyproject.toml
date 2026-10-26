@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-memory-kit"
+version = "0.1.0"
+description = "Keep a folder of agent memory files healthy: size caps, index checks, local recall, duplicate proposals, reversible apply."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+agent-memory = "agent_memory_kit.cli:main"
+
+[tool.setuptools]
+packages = ["agent_memory_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

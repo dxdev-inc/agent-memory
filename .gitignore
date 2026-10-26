@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# scratch copies of the example memory folder used in the README quick start
+demo-memory/
+# proposal runs written by `agent-memory propose`
+.agent-memory-runs/
