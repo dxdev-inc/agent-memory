@@ -83,7 +83,7 @@ agent-memory check --memory-dir examples/memory
 ```
 
 ```
-MEMORY.md: 18 lines (target 180, hard 200) [ok]
+MEMORY.md: 17 lines (target 180, hard 200) [ok]
 MEMORY.md: 967 bytes (target 17408, hard 25600) [ok]
 Topic files: 8
 Body wikilinks: 1 unresolved [[..]] target(s) (informational): reference_branch_policy
@@ -106,7 +106,7 @@ agent-memory check --memory-dir demo-memory
 
 ```
 Rebuilt INDEX.md: 8 entries, 1731 bytes
-MEMORY.md: 18 lines (target 180, hard 200) [ok]
+MEMORY.md: 17 lines (target 180, hard 200) [ok]
 MEMORY.md: 967 bytes (target 17408, hard 25600) [ok]
 Topic files: 8
 INDEX.md references: 8 (orphans 0, dangling 0)
