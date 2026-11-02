@@ -38,7 +38,7 @@ The rule or fact, in a sentence or two.
 You need Python 3.10 or newer and git.
 
 ```
-git clone https://github.com/dxdev-inc/agent-memory.git
+git clone https://github.com/dxdev-inc/agent-memory-kit.git
 cd agent-memory-kit
 python -m venv .venv
 ```
