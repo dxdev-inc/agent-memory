@@ -1,6 +1,19 @@
-# agent-memory-kit
+# agent-memory
 
 A small command line tool for keeping a folder of agent memory files healthy. It checks that your always-loaded index fits inside the size limits agent tools load at session start, finds memory files nobody links to and links that point nowhere, recalls the right memory for a task hint, and flags near-duplicate memories so you can clean them up with a reviewed, fully reversible step. It uses only the Python standard library, never calls a model and never touches the network.
+
+## Try it
+
+You need Python 3.10 or newer and git.
+
+```
+git clone https://github.com/dxdev-inc/agent-memory.git
+cd agent-memory
+pip install -e .
+agent-memory check --memory-dir examples/memory
+```
+
+That checks eight invented sample memories and reports one problem on purpose. The [full walkthrough](#quick-start-from-zero) below fixes it, finds a duplicate and undoes the change. Deeper reading: [the file format](#the-memory-file-format), [every command](#commands), [what `apply` does to your files](#commands).
 
 ## The memory file format
 
@@ -38,8 +51,8 @@ The rule or fact, in a sentence or two.
 You need Python 3.10 or newer and git.
 
 ```
-git clone https://github.com/dxdev-inc/agent-memory-kit.git
-cd agent-memory-kit
+git clone https://github.com/dxdev-inc/agent-memory.git
+cd agent-memory
 python -m venv .venv
 ```
 

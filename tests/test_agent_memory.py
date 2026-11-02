@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from agent_memory_kit import apply as apply_mod
-from agent_memory_kit import check as check_mod
-from agent_memory_kit import propose as propose_mod
-from agent_memory_kit import recall as recall_mod
-from agent_memory_kit.cli import main
-from agent_memory_kit.corpus import load_dir
+from agent_memory import apply as apply_mod
+from agent_memory import check as check_mod
+from agent_memory import propose as propose_mod
+from agent_memory import recall as recall_mod
+from agent_memory.cli import main
+from agent_memory.corpus import load_dir
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "memory"
 DUP_A = "feedback_run_tests_before_saying_done"
