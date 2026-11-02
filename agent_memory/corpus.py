@@ -19,6 +19,7 @@ KINDS = {"feedback", "reference", "project", "user"}
 
 _FM_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 _COMMENT_RE = re.compile(r"\s+#.*$")
+_QUOTED_RE = re.compile(r"""^(["'])(.*?)\1(?:\s+#.*)?$""")
 _DATE_RE = re.compile(r"\b(20\d\d)-(\d\d)-(\d\d)\b")
 
 
@@ -35,9 +36,12 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         k, _, v = line.partition(":")
         k = k.strip().lstrip("-").strip()
         v = v.strip()
-        if v[:1] not in ('"', "'"):
-            v = _COMMENT_RE.sub("", v)  # YAML: ` #` starts a comment on an unquoted value
-        v = v.strip().strip('"').strip("'")
+        q = _QUOTED_RE.match(v)
+        if q:
+            v = q.group(2)  # quoted value: a trailing ` # note` is a comment
+        else:
+            v = _COMMENT_RE.sub("", v).strip()  # YAML: ` #` starts a comment on an unquoted value
+            v = v.strip('"').strip("'")
         if k and v and k not in fm:
             fm[k] = v
     return fm, text[m.end():]

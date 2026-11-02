@@ -157,8 +157,10 @@ def check(mem: Path) -> int:
         print(f"agent-memory: MEMORY.md not found at {memory_md}", file=sys.stderr)
         return 1
 
-    mtext = memory_md.read_text(encoding="utf-8")
-    mbytes = len(mtext.encode("utf-8"))
+    # Raw bytes, so CRLF files are not undercounted by newline translation.
+    mraw = memory_md.read_bytes()
+    mtext = mraw.decode("utf-8", errors="replace")
+    mbytes = len(mraw)
     mlines = count_lines(mtext)
 
     def status(val, target, hard):

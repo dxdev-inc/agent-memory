@@ -19,7 +19,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import similarity
-from .apply import SNAPSHOT
+from .apply import (SNAPSHOT, ApplyError, check_run_id,
+                    check_runs_outside_memory)
 from .corpus import MemoryFile, load_dir
 
 APPLICABLE = {"merge", "retire"}
@@ -88,8 +89,13 @@ def propose(memory_dir: Path, *, runs_dir: Path | None = None,
                       "bytes": {c.a: by_slug[c.a].bytes, c.b: by_slug[c.b].bytes}},
             keep=keep.slug))
 
-    stamp = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = run_id if run_id is not None else datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = (Path(runs_dir) if runs_dir else Path(DEFAULT_RUNS_DIR)) / stamp
+    try:
+        check_run_id(stamp)
+        check_runs_outside_memory(run_dir, memory_dir)
+    except ApplyError as e:
+        raise ProposeError(str(e)) from None
     # A run that was already applied owns a snapshot (and retired files) that
     # `apply --undo` restores from. Writing a new proposal over it would leave
     # that snapshot stale, so an applied run id is never reused.

@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 DECISIONS = {"hold", "apply", "reject"}
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
 SNAPSHOT = "snapshot-before"
 _DECISION_RE = re.compile(r"^decision:\s*(\w+)\s*<!--\s*(M-\d+):", re.MULTILINE)
 
@@ -80,6 +81,27 @@ def check_slug(memory_dir: Path, slug: str) -> None:
                          f"inside {memory_dir}, never a path. Nothing was touched.")
 
 
+def check_run_id(run_id: str) -> None:
+    """A run id is one folder name: letters, digits, `-`, `_`, and dots only
+    between other characters. No separators, no `..`, not empty."""
+    if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
+        raise ApplyError(
+            f"refusing run id {run_id!r}: use letters, digits, '-' and '_' "
+            f"(dots only inside the name); no path separators, no '..', not empty.")
+
+
+def check_runs_outside_memory(run_dir: Path, memory_dir: Path) -> None:
+    """The run folder (and its snapshot) must not live inside the memory folder,
+    or the snapshot would copy itself into itself."""
+    run, mem = Path(run_dir).resolve(), Path(memory_dir).resolve()
+    if run == mem or mem in run.parents:
+        raise ApplyError(
+            f"refusing: the runs folder {run} is inside the memory folder {mem}. "
+            f"Use --runs-dir with a location outside the memory folder "
+            f"(the default .agent-memory-runs is relative to the current "
+            f"directory, so run from outside the memory folder). Nothing was touched.")
+
+
 def plan(run_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
     """(to_execute, skipped_by_decision, not_applicable)."""
     payload, decisions = load_run(run_dir)
@@ -89,7 +111,7 @@ def plan(run_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
         row = item | {"decision": decision}
         if decision != "apply":
             skipped.append(row)
-        elif not item.get("applicable"):
+        elif not (item.get("applicable") or item.get("applyable")):
             blocked.append(row)
         else:
             execute.append(row)
@@ -103,6 +125,8 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     if not memory_dir.is_dir():
         raise ApplyError(f"memory directory is gone: {memory_dir}")
 
+    check_run_id(run_dir.resolve().name)
+    check_runs_outside_memory(run_dir, memory_dir)
     execute, skipped, blocked = plan(run_dir)
     for row in execute:
         for slug in row["files"]:
@@ -123,16 +147,31 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
         return {"executed": 0, "held": held, "rejected": rejected,
                 "refused": len(blocked), "dry_run": not yes}
 
+    run_id = run_dir.resolve().name
+    if (run_dir / SNAPSHOT).exists() or (memory_dir / ".retired" / run_id / "MANIFEST.json").exists():
+        raise ApplyError(
+            f"run '{run_id}' was already applied; its manifest and undo snapshot "
+            f"are kept. Run `agent-memory apply {run_dir} --undo --yes` to put it "
+            f"back, then propose again with a new --run-id. Nothing was touched.")
+
+    # Same refusals the real run would hit, so a dry run predicts them.
+    refusals = {row["id"]: why for row in execute
+                if (why := _merge_refusal(memory_dir, row))}
+    ok_rows = [r for r in execute if r["id"] not in refusals]
+
     if not yes:
         for row in execute:
+            if row["id"] in refusals:
+                log(f"WOULD REFUSE {row['id']}: {refusals[row['id']]}")
+                continue
             log(f"WOULD {row['action']:<7} {', '.join(row['files'])}"
                 + (f"  -> {row.get('merged_slug')}.md"
                    if row["action"] == "merge" else ""))
         log("apply: dry run. Re-run with --yes to execute.")
-        return {"executed": 0, "would_execute": len(execute), "held": held,
-                "rejected": rejected, "refused": len(blocked), "dry_run": True}
+        return {"executed": 0, "would_execute": len(ok_rows), "held": held,
+                "rejected": rejected, "refused": len(blocked) + len(refusals),
+                "dry_run": True}
 
-    run_id = run_dir.name
     snapshot = run_dir / SNAPSHOT
     if not snapshot.exists():
         shutil.copytree(memory_dir, snapshot,
@@ -146,17 +185,12 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     refused = len(blocked)
 
     for row in execute:
+        if row["id"] in refusals:
+            log(f"REFUSED {row['id']}: {refusals[row['id']]}")
+            refused += 1
+            continue
         if row["action"] == "merge":
-            if not row.get("merged_slug") or not row.get("merged_body"):
-                log(f"REFUSED {row['id']}: merge item has no merged_slug / "
-                    f"merged_body in proposal.json")
-                continue
             target = memory_dir / f"{row['merged_slug']}.md"
-            if target.exists() and row["merged_slug"] not in row["files"]:
-                log(f"REFUSED {row['id']}: {target.name} already exists and is "
-                    f"not one of the files being merged; not overwriting it.")
-                refused += 1
-                continue
             body = (_frontmatter_for(row["merged_slug"],
                                      row.get("merged_description", ""),
                                      row["files"])
@@ -182,6 +216,19 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     return {"executed": done, "held": held, "rejected": rejected,
             "refused": refused, "retired": len(manifest),
             "dry_run": False, "retired_dir": str(retired_dir)}
+
+
+def _merge_refusal(memory_dir: Path, row: dict) -> str | None:
+    """Why a merge item cannot run, or None. Shared by dry run and real run."""
+    if row["action"] != "merge":
+        return None
+    if not row.get("merged_slug") or not row.get("merged_body"):
+        return "merge item has no merged_slug / merged_body in proposal.json"
+    target = memory_dir / f"{row['merged_slug']}.md"
+    if target.exists() and row["merged_slug"] not in row["files"]:
+        return (f"{target.name} already exists and is not one of the files "
+                f"being merged; not overwriting it.")
+    return None
 
 
 def _retire(path: Path, retired_dir: Path, row: dict, manifest: list[dict],
