@@ -104,7 +104,10 @@ def propose(memory_dir: Path, *, runs_dir: Path | None = None,
             f"run id '{stamp}' was already applied and its undo snapshot is kept. "
             f"Pick a new --run-id, or remove {run_dir} and "
             f"{memory_dir / '.retired' / stamp} yourself if you no longer need to undo it.")
-    run_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        run_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise ProposeError(f"cannot create the run folder {run_dir}: {e}") from None
     summary = {
         "memory_dir": str(memory_dir),
         "generated": datetime.now().isoformat(timespec="seconds"),
@@ -114,10 +117,13 @@ def propose(memory_dir: Path, *, runs_dir: Path | None = None,
         "applicable": sum(1 for i in items if i.action in APPLICABLE),
     }
     payload = {"summary": summary, "items": [i.as_dict() for i in items]}
-    (run_dir / "proposal.json").write_text(json.dumps(payload, indent=2),
-                                           encoding="utf-8")
-    (run_dir / "proposal.md").write_text(
-        render_proposal(summary, items, memories, run_dir), encoding="utf-8")
+    try:
+        (run_dir / "proposal.json").write_text(json.dumps(payload, indent=2),
+                                               encoding="utf-8")
+        (run_dir / "proposal.md").write_text(
+            render_proposal(summary, items, memories, run_dir), encoding="utf-8")
+    except OSError as e:
+        raise ProposeError(f"cannot write the proposal in {run_dir}: {e}") from None
     log(f"memory: proposal written to {(run_dir / 'proposal.md').as_posix()}")
     return run_dir, summary
 
@@ -147,7 +153,7 @@ agent-memory apply {run_dir} --undo --yes   # put everything back
 ```
 
 Apply never deletes. A retired memory moves to `.retired/<run-id>/` inside the
-memory directory, with a manifest, and `--undo` restores the whole directory
+memory directory, with a manifest, and `--undo` restores the top-level `.md` files
 from a snapshot taken before the first change.
 
 ### What this pass cannot see

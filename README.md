@@ -171,7 +171,7 @@ The second command prints the same first line, then the snapshot location, `RETI
 agent-memory apply .agent-memory-runs/demo --undo --yes
 ```
 
-It prints `undo: restored 10 files into <your path>/demo-memory`, and every file is byte for byte what it was before.
+It prints `undo: restored 10 files into <your path>/demo-memory`, and every memory file is byte for byte what it was before.
 
 To walk through it a second time, give `propose` a new run id (`--run-id demo2`, and use `.agent-memory-runs/demo2` in the later commands). It refuses to reuse `demo` once that run has been applied, so an old undo snapshot can never be mixed up with a new proposal.
 
@@ -184,14 +184,14 @@ All commands that read a memory folder take `--memory-dir DIR`, or read the `AGE
 | `agent-memory check` | Reports `MEMORY.md` size against the target (180 lines / 17 KB) and the hard cap (200 lines / 25 KB), names the entries that would be dropped past a cap, lists topic files missing from `INDEX.md`, links that point at missing files, and files without `name` or `description`. Exit 1 on any problem. |
 | `agent-memory rebuild-index [--areas FILE]` | Regenerates `INDEX.md` from frontmatter, one line per memory. By default entries are grouped by `type`. `--areas` takes a JSON file such as `{"areas": {"Deploys": ["deploy", "release"]}}`: the first area whose keyword appears in a memory's name or filename wins, the rest go under Other. |
 | `agent-memory recall "<hint>" [-n 5] [--sid ID] [--json]` | Local TF-IDF lookup over filename, name and description, with a smaller weight on the body. Returns a few hits or none. With `--sid`, a memory already shown for that session id is not shown again (the seen list lives in `<memory-dir>/.recall-seen/`). |
-| `agent-memory propose [--runs-dir DIR] [--run-id ID]` | Finds near-duplicate pairs with a word-overlap index and writes `proposal.md` and `proposal.json` into `.agent-memory-runs/<run-id>/`. Changes no memory. A run id is letters, digits, `-` and `_`, with dots only inside the name (no slashes, no `..`, not empty). The runs folder must be outside the memory folder; `propose` and `apply` refuse otherwise. |
-| `agent-memory apply RUN_DIR [--yes] [--undo]` | Executes the items you marked `decision: apply`. Dry run unless `--yes`. `--undo` restores the folder from the snapshot taken before the first change. |
+| `agent-memory propose [--runs-dir DIR] [--run-id ID]` | Finds near-duplicate pairs with a word-overlap index and writes `proposal.md` and `proposal.json` into `.agent-memory-runs/<run-id>/`. Changes no memory. A run id is letters, digits, `-` and `_`, with dots only inside the name (no slashes, no `..`, not empty, no Windows device names such as `CON` or `NUL`). The runs folder must be outside the memory folder; `propose` and `apply` refuse otherwise. |
+| `agent-memory apply RUN_DIR [--yes] [--undo]` | Executes the items you marked `decision: apply`. Dry run unless `--yes`. `--undo` restores the top-level `.md` files from the snapshot taken before the first change. |
 
 How `apply` keeps you safe:
 
 * Nothing runs without a human mark; every item starts as `hold`.
 * Retired files move to `<memory-dir>/.retired/<run-id>/` with a `MANIFEST.json`. They are never deleted.
-* A full snapshot of the folder is taken before the first change.
+* A snapshot of the folder's top-level `.md` files is taken before the first change. `--undo` restores exactly those files; anything else in the folder (settings, `.retired/`, `.recall-seen/`) is left as it is.
 * A run applies once. Applying it again is refused, so its manifest is never overwritten; `--undo` still works.
 * The dry run runs the same checks as `--yes`, including a merge whose target file already exists, and prints `WOULD REFUSE` for what the real run would refuse.
 * `merge` items are supported when `proposal.json` carries `merged_slug` and `merged_body`, but `propose` does not write those. It proposes `retire` of the smaller file in a pair and keeps the larger. A retire loses whatever the dropped file said that the kept one does not, so read both first.

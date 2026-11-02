@@ -11,8 +11,9 @@ silently losing one is worse than keeping a duplicate forever.
    `decision: hold`. Apply reads the decisions out of `proposal.md`, the file a
    person edits, not the JSON. Zero `apply` marks means apply refuses.
 3. Only two actions execute: `merge` and `retire`.
-4. A full snapshot of the memory directory precedes the first change, and
-   `--undo` restores it wholesale.
+4. A snapshot of the memory directory's top-level `.md` files precedes the
+   first change, and `--undo` restores exactly those files. Other files in the
+   folder (settings, `.retired/`, `.recall-seen/`) are never touched by undo.
 5. Dry run is the default. `--yes` is required to touch disk.
 
 A `merge` item needs `merged_slug` and `merged_body` in `proposal.json`
@@ -28,6 +29,9 @@ from datetime import datetime
 from pathlib import Path
 
 DECISIONS = {"hold", "apply", "reject"}
+_RESERVED = ({"CON", "PRN", "AUX", "NUL"}
+             | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)})
+_BAD_CHARS = set('<>:"|?*/\\\0') | {chr(i) for i in range(32)}
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
 SNAPSHOT = "snapshot-before"
 _DECISION_RE = re.compile(r"^decision:\s*(\w+)\s*<!--\s*(M-\d+):", re.MULTILINE)
@@ -72,7 +76,8 @@ def check_slug(memory_dir: Path, slug: str) -> None:
     A slug is a bare file name without its `.md`: no separators, no drive
     letter, no leading dot (so no `..`, no `.retired`)."""
     bad = (not isinstance(slug, str) or not slug or slug.startswith(".")
-           or any(c in slug for c in '/\\:\0'))
+           or slug != slug.rstrip(". ") or is_reserved_name(slug)
+           or any(c in _BAD_CHARS for c in slug))
     if not bad:
         target = (memory_dir / f"{slug}.md").resolve()
         bad = target.parent != memory_dir.resolve()
@@ -81,13 +86,20 @@ def check_slug(memory_dir: Path, slug: str) -> None:
                          f"inside {memory_dir}, never a path. Nothing was touched.")
 
 
+def is_reserved_name(name: str) -> bool:
+    """Windows device names (CON, NUL, COM1 ...), with or without an extension."""
+    return name.split(".")[0].rstrip(" ").upper() in _RESERVED
+
+
 def check_run_id(run_id: str) -> None:
     """A run id is one folder name: letters, digits, `-`, `_`, and dots only
     between other characters. No separators, no `..`, not empty."""
-    if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
+    if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id) \
+            or is_reserved_name(run_id):
         raise ApplyError(
             f"refusing run id {run_id!r}: use letters, digits, '-' and '_' "
-            f"(dots only inside the name); no path separators, no '..', not empty.")
+            f"(dots only inside the name); no path separators, no '..', not empty, "
+            f"no Windows device names such as CON, NUL or COM1.")
 
 
 def check_runs_outside_memory(run_dir: Path, memory_dir: Path) -> None:
@@ -158,6 +170,12 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     refusals = {row["id"]: why for row in execute
                 if (why := _merge_refusal(memory_dir, row))}
     ok_rows = [r for r in execute if r["id"] not in refusals]
+    if yes and not ok_rows:
+        for row in execute:
+            log(f"REFUSED {row['id']}: {refusals[row['id']]}")
+        log("apply: nothing can run. Nothing was touched; the run id is not used up.")
+        return {"executed": 0, "held": held, "rejected": rejected,
+                "refused": len(blocked) + len(refusals), "dry_run": False}
 
     if not yes:
         for row in execute:
@@ -174,8 +192,9 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
 
     snapshot = run_dir / SNAPSHOT
     if not snapshot.exists():
-        shutil.copytree(memory_dir, snapshot,
-                        ignore=shutil.ignore_patterns(".retired"))
+        snapshot.mkdir(parents=True)
+        for f in sorted(memory_dir.glob("*.md")):
+            shutil.copy2(f, snapshot / f.name)
         log(f"apply: snapshot of {memory_dir} -> {snapshot}")
 
     retired_dir = memory_dir / ".retired" / run_id
@@ -220,6 +239,8 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
 
 def _merge_refusal(memory_dir: Path, row: dict) -> str | None:
     """Why a merge item cannot run, or None. Shared by dry run and real run."""
+    if not any((memory_dir / f"{slug}.md").exists() for slug in row["files"]):
+        return "none of its source files exist any more; nothing to do."
     if row["action"] != "merge":
         return None
     if not row.get("merged_slug") or not row.get("merged_body"):
@@ -261,7 +282,9 @@ def undo_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
 
     # Park whatever is there now, so undo is itself undoable.
     parked = run_dir / f"pre-undo-{datetime.now().strftime('%H%M%S')}"
-    shutil.copytree(memory_dir, parked, ignore=shutil.ignore_patterns(".retired"))
+    parked.mkdir(parents=True)
+    for f in sorted(memory_dir.glob("*.md")):
+        shutil.copy2(f, parked / f.name)
     for p in memory_dir.glob("*.md"):
         p.unlink()
     for p in files:

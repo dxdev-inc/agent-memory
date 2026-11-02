@@ -13,6 +13,7 @@ already surfaced in that session).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -102,8 +103,10 @@ def _hit(m: MemoryFile, score: float, now: float) -> Hit:
 # ---- seen-set -------------------------------------------------------------
 
 def _seen_path(seen_dir: Path, sid: str) -> Path:
-    safe = re.sub(r"[^A-Za-z0-9_\-]", "_", sid)
-    return Path(seen_dir) / f"{safe}.json"
+    safe = re.sub(r"[^A-Za-z0-9_\-]", "_", sid)[:80]
+    # Distinct ids that sanitize to the same text must not share a file.
+    digest = hashlib.sha256(sid.encode("utf-8")).hexdigest()[:10]
+    return Path(seen_dir) / f"{safe}-{digest}.json"
 
 
 def load_seen(seen_dir: Path, sid: str) -> set[str]:

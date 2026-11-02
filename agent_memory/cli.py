@@ -82,7 +82,7 @@ def _cmd_propose(args: argparse.Namespace) -> int:
     try:
         run_dir, summary = propose_mod.propose(
             mem, runs_dir=args.runs_dir, run_id=args.run_id)
-    except propose_mod.ProposeError as e:
+    except (propose_mod.ProposeError, OSError) as e:
         print(f"agent-memory propose: {e}", file=sys.stderr)
         return 1
     print()
@@ -99,7 +99,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             apply_mod.undo_run(Path(args.run_dir), yes=args.yes)
         else:
             apply_mod.apply_run(Path(args.run_dir), yes=args.yes)
-    except apply_mod.ApplyError as e:
+    except (apply_mod.ApplyError, OSError) as e:
         print(f"agent-memory apply: {e}", file=sys.stderr)
         return 1
     return 0
