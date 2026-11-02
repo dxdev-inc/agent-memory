@@ -115,6 +115,11 @@ def rebuild_index(mem: Path, areas_file: Path | None = None) -> int:
     return 0
 
 
+def count_lines(text: str) -> int:
+    """Physical lines in `text`: a final newline ends the last line, it does not start another."""
+    return text.count("\n") + (0 if not text or text.endswith("\n") else 1)
+
+
 def past_limit(text: str, max_lines: int, max_bytes: int) -> list[tuple[int, str]]:
     """Lines of `text` that fall past `max_lines` or `max_bytes` (1-based).
 
@@ -124,7 +129,10 @@ def past_limit(text: str, max_lines: int, max_bytes: int) -> list[tuple[int, str
     """
     out: list[tuple[int, str]] = []
     used = 0
-    for i, line in enumerate(text.split("\n"), start=1):
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # the final newline ends the last line; it is not another line
+    for i, line in enumerate(lines, start=1):
         used += len(line.encode("utf-8")) + 1
         if i > max_lines or used - 1 > max_bytes:
             out.append((i, line))
@@ -151,7 +159,7 @@ def check(mem: Path) -> int:
 
     mtext = memory_md.read_text(encoding="utf-8")
     mbytes = len(mtext.encode("utf-8"))
-    mlines = mtext.count("\n") + 1
+    mlines = count_lines(mtext)
 
     def status(val, target, hard):
         if val > hard:

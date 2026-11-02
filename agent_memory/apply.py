@@ -65,8 +65,23 @@ def _frontmatter_for(slug: str, description: str, sources: list[str]) -> str:
             "---\n\n")
 
 
+def check_slug(memory_dir: Path, slug: str) -> None:
+    """Refuse a slug that could name a file outside `memory_dir`.
+
+    A slug is a bare file name without its `.md`: no separators, no drive
+    letter, no leading dot (so no `..`, no `.retired`)."""
+    bad = (not isinstance(slug, str) or not slug or slug.startswith(".")
+           or any(c in slug for c in '/\\:\0'))
+    if not bad:
+        target = (memory_dir / f"{slug}.md").resolve()
+        bad = target.parent != memory_dir.resolve()
+    if bad:
+        raise ApplyError(f"refusing unsafe slug {slug!r}: a slug is a file name "
+                         f"inside {memory_dir}, never a path. Nothing was touched.")
+
+
 def plan(run_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
-    """(to_execute, skipped_by_decision, not_applyable)."""
+    """(to_execute, skipped_by_decision, not_applicable)."""
     payload, decisions = load_run(run_dir)
     execute, skipped, blocked = [], [], []
     for item in payload["items"]:
@@ -74,7 +89,7 @@ def plan(run_dir: Path) -> tuple[list[dict], list[dict], list[dict]]:
         row = item | {"decision": decision}
         if decision != "apply":
             skipped.append(row)
-        elif not item.get("applyable"):
+        elif not item.get("applicable"):
             blocked.append(row)
         else:
             execute.append(row)
@@ -89,6 +104,11 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
         raise ApplyError(f"memory directory is gone: {memory_dir}")
 
     execute, skipped, blocked = plan(run_dir)
+    for row in execute:
+        for slug in row["files"]:
+            check_slug(memory_dir, slug)
+        if row["action"] == "merge" and row.get("merged_slug"):
+            check_slug(memory_dir, row["merged_slug"])
     for row in blocked:
         log(f"REFUSED {row['id']}: marked apply but action is "
             f"'{row['action']}', which this tool does not execute.")
@@ -123,6 +143,7 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     retired_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict] = []
     done = 0
+    refused = len(blocked)
 
     for row in execute:
         if row["action"] == "merge":
@@ -131,6 +152,11 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
                     f"merged_body in proposal.json")
                 continue
             target = memory_dir / f"{row['merged_slug']}.md"
+            if target.exists() and row["merged_slug"] not in row["files"]:
+                log(f"REFUSED {row['id']}: {target.name} already exists and is "
+                    f"not one of the files being merged; not overwriting it.")
+                refused += 1
+                continue
             body = (_frontmatter_for(row["merged_slug"],
                                      row.get("merged_description", ""),
                                      row["files"])
@@ -154,7 +180,7 @@ def apply_run(run_dir: Path, *, yes: bool = False, log=print) -> dict:
     log(f"apply: {done} item(s) executed. Retired files in {retired_dir}")
     log(f"apply: undo with `agent-memory apply {run_dir} --undo --yes`")
     return {"executed": done, "held": held, "rejected": rejected,
-            "refused": len(blocked), "retired": len(manifest),
+            "refused": refused, "retired": len(manifest),
             "dry_run": False, "retired_dir": str(retired_dir)}
 
 

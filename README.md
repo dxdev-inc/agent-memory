@@ -141,7 +141,7 @@ memory: 8 files in demo-memory
 memory: 1 near-duplicate candidate pair(s) (lexical)
 memory: proposal written to .agent-memory-runs/demo/proposal.md
 
-  8 memories read, 1 proposal(s), 1 applyable
+  8 memories read, 1 proposal(s), 1 applicable
   review:  .agent-memory-runs/demo/proposal.md
   then:    agent-memory apply .agent-memory-runs/demo
 ```

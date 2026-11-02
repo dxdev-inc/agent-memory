@@ -313,3 +313,117 @@ def test_cli_full_flow(mem, tmp_path, capsys):
     assert main(["apply", str(runs / "x"), "--yes"]) == 0
     assert main(["apply", str(runs / "x"), "--undo", "--yes"]) == 0
     assert _snapshot(mem) == before
+
+
+# ---- review fixes ---------------------------------------------------------
+
+
+def _edit_item(run_dir: Path, **fields) -> None:
+    pj = run_dir / "proposal.json"
+    payload = json.loads(pj.read_text())
+    payload["items"][0].update(fields)
+    pj.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_slug_path_traversal_is_refused_and_nothing_moves(mem, tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("not a memory\n", encoding="utf-8")
+    run_dir = _run(mem, tmp_path)
+    _edit_item(run_dir, action="retire", files=["../outside"])
+    _mark_apply(run_dir)
+    before = _snapshot(mem)
+    with pytest.raises(apply_mod.ApplyError):
+        apply_mod.apply_run(run_dir, yes=True, log=lambda *_: None)
+    assert outside.read_text() == "not a memory\n"
+    assert _snapshot(mem) == before
+    assert not (run_dir / apply_mod.SNAPSHOT).exists()
+
+
+@pytest.mark.parametrize("slug", ["..", "a/b", "a\\b", ".retired", "C:evil", ""])
+def test_unsafe_slugs_are_rejected(mem, slug):
+    with pytest.raises(apply_mod.ApplyError):
+        apply_mod.check_slug(mem, slug)
+
+
+def test_unsafe_merged_slug_is_refused(mem, tmp_path):
+    run_dir = _run(mem, tmp_path)
+    _edit_item(run_dir, action="merge", files=[DUP_A, DUP_B],
+               merged_slug="../escaped", merged_body="x\n")
+    _mark_apply(run_dir)
+    with pytest.raises(apply_mod.ApplyError):
+        apply_mod.apply_run(run_dir, yes=True, log=lambda *_: None)
+    assert not (tmp_path / "escaped.md").exists()
+
+
+def test_merge_never_overwrites_an_unrelated_existing_memory(mem, tmp_path):
+    keep = next(p for p in sorted(mem.glob("*.md"))
+                if p.stem not in (DUP_A, DUP_B, "MEMORY", "INDEX"))
+    original = keep.read_bytes()
+    run_dir = _run(mem, tmp_path)
+    _edit_item(run_dir, action="merge", files=[DUP_A, DUP_B],
+               merged_slug=keep.stem, merged_body="Replacement.\n")
+    _mark_apply(run_dir)
+    res = apply_mod.apply_run(run_dir, yes=True, log=lambda *_: None)
+    assert keep.read_bytes() == original
+    assert (mem / f"{DUP_A}.md").exists() and (mem / f"{DUP_B}.md").exists()
+    assert res["executed"] == 0 and res["refused"] == 1
+
+
+def test_a_run_id_that_was_applied_cannot_be_reused(mem, tmp_path):
+    run_dir = _run(mem, tmp_path)
+    _mark_apply(run_dir)
+    apply_mod.apply_run(run_dir, yes=True, log=lambda *_: None)
+    with pytest.raises(propose_mod.ProposeError):
+        _run(mem, tmp_path)
+    # the snapshot is still the one taken before the apply, so undo is still right
+    apply_mod.undo_run(run_dir, yes=True, log=lambda *_: None)
+    assert (mem / f"{DUP_B}.md").exists()
+
+
+def test_reusing_an_unapplied_run_id_is_fine(mem, tmp_path):
+    _run(mem, tmp_path)
+    _run(mem, tmp_path)
+
+
+def test_cli_propose_reports_a_reused_run_id(mem, tmp_path, capsys):
+    run_dir = _run(mem, tmp_path)
+    _mark_apply(run_dir)
+    apply_mod.apply_run(run_dir, yes=True, log=lambda *_: None)
+    rc = main(["propose", "--memory-dir", str(mem), "--runs-dir",
+               str(tmp_path / "runs"), "--run-id", "t"])
+    assert rc == 1 and "already applied" in capsys.readouterr().err
+
+
+def test_readme_frontmatter_example_parses_literally(tmp_path):
+    (tmp_path / "run_tests_first.md").write_text(
+        "---\nname: run_tests_first\ndescription: \"One line, with # inside quotes.\"\n"
+        "metadata:\n  type: feedback        # user | feedback | project | reference\n---\n\nBody.\n",
+        encoding="utf-8")
+    (m,) = load_dir(tmp_path)
+    assert m.kind == "feedback"
+    assert m.description == "One line, with # inside quotes."
+
+
+def test_final_newline_does_not_add_a_line():
+    assert check_mod.count_lines("a\nb\n") == 2
+    assert check_mod.count_lines("a\nb") == 2
+    assert check_mod.count_lines("") == 0
+    assert check_mod.past_limit("a\nb\n", 2, 10_000) == []
+
+
+def test_file_of_exactly_the_target_lines_is_ok(tmp_path, capsys):
+    body = "\n".join(f"- [entry {i}](e{i}.md): hook"
+                     for i in range(1, check_mod.TARGET_LINES + 1)) + "\n"
+    check_mod.check(_write_index_only(tmp_path, body))
+    out = capsys.readouterr().out
+    assert f"MEMORY.md: {check_mod.TARGET_LINES} lines" in out
+    assert "past the target" not in out
+
+
+def test_summary_and_json_use_the_correct_spelling(mem, tmp_path, capsys):
+    run_dir = _run(mem, tmp_path)
+    payload = json.loads((run_dir / "proposal.json").read_text())
+    assert payload["summary"]["applicable"] == 1
+    assert payload["items"][0]["applicable"] is True
+    assert "applyable" not in json.dumps(payload)
+    assert "applicable" in (run_dir / "proposal.md").read_text()

@@ -79,11 +79,15 @@ def _cmd_propose(args: argparse.Namespace) -> int:
     mem = _memory_dir(args)
     if mem is None:
         return 2
-    run_dir, summary = propose_mod.propose(
-        mem, runs_dir=args.runs_dir, run_id=args.run_id)
+    try:
+        run_dir, summary = propose_mod.propose(
+            mem, runs_dir=args.runs_dir, run_id=args.run_id)
+    except propose_mod.ProposeError as e:
+        print(f"agent-memory propose: {e}", file=sys.stderr)
+        return 1
     print()
     print(f"  {summary['files']} memories read, {summary['items']} proposal(s), "
-          f"{summary['applyable']} applyable")
+          f"{summary['applicable']} applicable")
     print(f"  review:  {(run_dir / 'proposal.md').as_posix()}")
     print(f"  then:    agent-memory apply {run_dir.as_posix()}")
     return 0

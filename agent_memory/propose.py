@@ -19,10 +19,15 @@ from datetime import datetime
 from pathlib import Path
 
 from . import similarity
+from .apply import SNAPSHOT
 from .corpus import MemoryFile, load_dir
 
-APPLYABLE = {"merge", "retire"}
+APPLICABLE = {"merge", "retire"}
 DEFAULT_RUNS_DIR = ".agent-memory-runs"
+
+
+class ProposeError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -39,7 +44,7 @@ class Item:
         return {"id": self.id, "class": self.rot_class, "action": self.action,
                 "files": self.files, "reason": self.reason,
                 "evidence": self.evidence, "keep": self.keep,
-                "applyable": self.action in APPLYABLE}
+                "applicable": self.action in APPLICABLE}
 
 
 def _which_to_keep(a: MemoryFile, b: MemoryFile) -> tuple[MemoryFile, MemoryFile]:
@@ -85,6 +90,14 @@ def propose(memory_dir: Path, *, runs_dir: Path | None = None,
 
     stamp = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = (Path(runs_dir) if runs_dir else Path(DEFAULT_RUNS_DIR)) / stamp
+    # A run that was already applied owns a snapshot (and retired files) that
+    # `apply --undo` restores from. Writing a new proposal over it would leave
+    # that snapshot stale, so an applied run id is never reused.
+    if (run_dir / SNAPSHOT).exists() or (memory_dir / ".retired" / stamp).exists():
+        raise ProposeError(
+            f"run id '{stamp}' was already applied and its undo snapshot is kept. "
+            f"Pick a new --run-id, or remove {run_dir} and "
+            f"{memory_dir / '.retired' / stamp} yourself if you no longer need to undo it.")
     run_dir.mkdir(parents=True, exist_ok=True)
     summary = {
         "memory_dir": str(memory_dir),
@@ -92,7 +105,7 @@ def propose(memory_dir: Path, *, runs_dir: Path | None = None,
         "files": len(memories),
         "candidate_pairs": len(cands),
         "items": len(items),
-        "applyable": sum(1 for i in items if i.action in APPLYABLE),
+        "applicable": sum(1 for i in items if i.action in APPLICABLE),
     }
     payload = {"summary": summary, "items": [i.as_dict() for i in items]}
     (run_dir / "proposal.json").write_text(json.dumps(payload, indent=2),
@@ -109,7 +122,7 @@ HEADER = """\
 **Nothing here has happened.** This file is a proposal over
 `{memory_dir}`. No memory was created, edited, moved or deleted to produce it.
 
-{files} memories read, {items} proposal(s), {applyable} applyable.
+{files} memories read, {items} proposal(s), {applicable} applicable.
 
 ## How to review
 
